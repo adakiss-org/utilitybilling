@@ -73,14 +73,28 @@ public class UtilityBillingService {
     // Update Bill: amount & status
     @Transactional
     public Bill updateBill(UUID billId, BigDecimal amount, BillStatus status) {
-        Bill bill = billRepository.findById(billId)
-                .orElseThrow(() -> new NoSuchElementException("Bill not found: " + billId.toString()));
-        if (amount != null) {
-            bill.setAmount(amount);
+        Optional<Bill> billOpt = billRepository.findById(billId);
+        if (billOpt.isPresent()) {
+            Bill bill = billOpt.get();
+            if (amount != null) {
+                bill.setAmount(amount);
+            }
+            bill.setStatus(status);
+            bill.setUpdatedAt(LocalDateTime.now(ZoneOffset.UTC));
+            return billRepository.save(bill);
+        } else {
+            // Create a new bill with the provided content and new ID
+            Bill newBill = Bill.builder()
+                    .id(UUID.randomUUID())
+                    .providerId(null) // Should be set by the caller if needed
+                    .amount(amount)
+                    .status(status)
+                    .dueDate(null) // Should be set by the caller if needed
+                    .createdAt(LocalDateTime.now(ZoneOffset.UTC))
+                    .updatedAt(LocalDateTime.now(ZoneOffset.UTC))
+                    .build();
+            return billRepository.save(newBill);
         }
-        bill.setStatus(status);
-        bill.setUpdatedAt(LocalDateTime.now(ZoneOffset.UTC));
-        return billRepository.save(bill);
     }
 
     // Fetch bills by yyyy-MM parameter
@@ -102,7 +116,10 @@ public class UtilityBillingService {
         if (ym.isAfter(currentYM)) {
             // Future month: calculate bills on the fly based on providers and frequency rules
             List<UtilityProvider> providers = providerRepository.findAll();
-            return generateBillsForMonth(providers, startOfMonth.toLocalDate());
+            List<Bill> bills = generateBillsForMonth(providers, startOfMonth.toLocalDate());
+            // Set status to DRAFT for all future bills
+            bills.forEach(b -> b.setStatus(BillStatus.DRAFT));
+            return bills;
         } else {
             // Actual or past month: fetch from DB
             return billRepository.findByDueDateBetween(startOfMonth, endOfMonth);
